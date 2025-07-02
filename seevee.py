@@ -30,6 +30,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from tqdm import tqdm
+import time
 
 
 class SeeVeeError(Exception):
@@ -356,44 +357,83 @@ class NVDFeedManager:
             return None
     
     def update_database_from_feeds(self, years: Optional[List[int]] = None, include_modified: bool = True):
-        """Update local database from NVD feeds"""
+        """
+        Update local database from NVD feeds
+        
+        Args:
+            years: List of specific years to download. If None, downloads all years from 2002 to current year.
+            include_modified: Whether to include modified and recent feeds for latest updates.
+        """
+        start_time = time.time()
+        
         if not self.use_local_db:
             print("Database not enabled")
             return
         
         # Determine which feeds to download
         feeds_to_download = []
+        current_year = datetime.now().year
         
+        if years:
+            # Sort years chronologically (old to new)
+            sorted_years = sorted(years)
+            for year in sorted_years:
+                feeds_to_download.append(f'nvdcve-2.0-{year}')
+        else:
+            # Default to all years from 2002 to current year (chronological order)
+            print(f"No specific years specified. Downloading all historical data from 2002 to {current_year}...")
+            for year in range(2002, current_year + 1):
+                feeds_to_download.append(f'nvdcve-2.0-{year}')
+        
+        # Add modified/recent feeds at the end to get latest updates
         if include_modified:
             feeds_to_download.extend(['nvdcve-2.0-modified', 'nvdcve-2.0-recent'])
         
         if years:
-            for year in years:
-                feeds_to_download.append(f'nvdcve-2.0-{year}')
+            print(f"Updating database from {len(feeds_to_download)} specified feed(s)")
         else:
-            # Default to current and previous year
-            current_year = datetime.now().year
-            feeds_to_download.extend([
-                f'nvdcve-2.0-{current_year}',
-                f'nvdcve-2.0-{current_year - 1}'
-            ])
+            year_count = current_year - 2002 + 1
+            print(f"Building comprehensive vulnerability database:")
+            print(f"  • Historical feeds: {year_count} years (2002-{current_year})")
+            if include_modified:
+                print(f"  • Recent updates: modified and recent feeds")
+            print(f"  • Total feeds to process: {len(feeds_to_download)}")
+            print(f"  • Processing order: chronological (oldest to newest)")
         
-        print(f"Updating database from feeds: {feeds_to_download}")
+        print(f"\nFeed processing order: {feeds_to_download}")
         
         total_imported = 0
+        feed_times = {}
+        
         with tqdm(total=len(feeds_to_download), desc="Processing feeds", unit="feed") as feed_pbar:
             for feed_name in feeds_to_download:
+                feed_start_time = time.time()
                 feed_pbar.set_description(f"Processing {feed_name}")
                 vulnerabilities = self.download_feed(feed_name)
                 if vulnerabilities:
                     imported = self._import_vulnerabilities(vulnerabilities)
                     total_imported += imported
-                    tqdm.write(f"Imported {imported} vulnerabilities from {feed_name}")
+                    feed_duration = time.time() - feed_start_time
+                    feed_times[feed_name] = feed_duration
+                    tqdm.write(f"Imported {imported} vulnerabilities from {feed_name} ({format_duration(feed_duration)})")
                 else:
-                    tqdm.write(f"No new data to import from {feed_name}")
+                    feed_duration = time.time() - feed_start_time
+                    feed_times[feed_name] = feed_duration
+                    tqdm.write(f"No new data to import from {feed_name} ({format_duration(feed_duration)})")
                 feed_pbar.update(1)
         
-        print(f"\nTotal vulnerabilities imported: {total_imported}")
+        total_duration = time.time() - start_time
+        print(f"\n=== Database Update Summary ===")
+        print(f"Total vulnerabilities imported: {total_imported}")
+        print(f"Total time: {format_duration(total_duration)}")
+        
+        if len(feeds_to_download) > 1:
+            print(f"\nPer-feed timing:")
+            for feed_name in feeds_to_download:
+                if feed_name in feed_times:
+                    print(f"  {feed_name}: {format_duration(feed_times[feed_name])}")
+                    
+        print(f"Average time per feed: {format_duration(total_duration / len(feeds_to_download))}")
     
     def _import_vulnerabilities(self, vulnerabilities: List[Dict]) -> int:
         """Import vulnerabilities into the database"""
@@ -656,12 +696,15 @@ class CWEClient:
         Returns:
             True if successful, False otherwise
         """
+        start_time = time.time()
+        
         if not self.use_local_db or not self.db:
             print("Local database not available for CWE import")
             return False
             
         try:
             print("Downloading CWE data from MITRE...")
+            download_start = time.time()
             url = "https://cwe.mitre.org/data/csv/699.csv.zip"
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -672,8 +715,10 @@ class CWEClient:
             }
             response = requests.get(url, headers=headers, timeout=30)
             response.raise_for_status()
+            download_duration = time.time() - download_start
             
-            print("Extracting and parsing CWE data...")
+            print(f"Extracting and parsing CWE data... (download took {format_duration(download_duration)})")
+            parsing_start = time.time()
             with zipfile.ZipFile(io.BytesIO(response.content)) as zip_file:
                 csv_filename = "699.csv"
                 if csv_filename in zip_file.namelist():
@@ -692,7 +737,14 @@ class CWEClient:
                                     imported_count += 1
                             pbar.update(1)
                     
+                    parsing_duration = time.time() - parsing_start
+                    total_duration = time.time() - start_time
+                    
                     print(f"Successfully imported {imported_count} CWE entries")
+                    print(f"=== CWE Update Summary ===")
+                    print(f"Download time: {format_duration(download_duration)}")
+                    print(f"Processing time: {format_duration(parsing_duration)}")
+                    print(f"Total time: {format_duration(total_duration)}")
                     return True
                 else:
                     print(f"CSV file {csv_filename} not found in ZIP")
@@ -939,6 +991,21 @@ def parse_cvss_vector(vector_string: str) -> Optional[Dict]:
         return None
 
 
+def format_duration(seconds: float) -> str:
+    """Format duration in seconds to human-readable string"""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    elif seconds < 3600:
+        minutes = int(seconds // 60)
+        secs = seconds % 60
+        return f"{minutes}m {secs:.1f}s"
+    else:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = seconds % 60
+        return f"{hours}h {minutes}m {secs:.1f}s"
+
+
 def analyze_cvss_risk(cve_id: str, version: str = 'v3', **kwargs) -> Optional[Dict]:
     """
     Analyze CVSS risk factors for a CVE
@@ -1019,7 +1086,7 @@ def update_database(years: Optional[List[int]] = None, include_modified: bool = 
     Update local database from NVD feeds
     
     Args:
-        years: List of years to download (default: current and previous year)
+        years: List of years to download (default: all years from 2002 to current year)
         include_modified: Whether to include modified and recent feeds
     """
     feed_manager = NVDFeedManager(use_local_db=True)
@@ -1161,7 +1228,7 @@ def main():
     # Database management
     parser.add_argument('--update-db', action='store_true', help='Update local database from NVD feeds')
     parser.add_argument('--update-cwe', action='store_true', help='Update local database with latest CWE data from MITRE')
-    parser.add_argument('--years', type=int, nargs='+', help='Years to download (default: current and previous year)')
+    parser.add_argument('--years', type=int, nargs='+', help='Years to download (default: all years from 2002 to current year)')
     parser.add_argument('--no-modified', action='store_true', help='Skip modified and recent feeds when updating')
     
     # API options
