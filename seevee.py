@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import csv
 import gzip
 import hashlib
 import io
@@ -52,10 +53,14 @@ class CVEDatabase:
                     last_modified TEXT,
                     cvss_v3_score REAL,
                     cvss_v3_severity TEXT,
+                    cvss_v3_vector TEXT,
+                    cvss_v3_details TEXT,
                     cvss_v2_score REAL,
                     cvss_v2_severity TEXT,
+                    cvss_v2_vector TEXT,
+                    cvss_v2_details TEXT,
                     description TEXT,
-                    references TEXT,
+                    reference_urls TEXT,
                     cwe_ids TEXT,
                     vendor_name TEXT,
                     product_name TEXT,
@@ -72,6 +77,19 @@ class CVEDatabase:
                     last_updated TEXT
                 )
             """)
+            
+            # Table for CWE data
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS cwe_data (
+                    cwe_id TEXT PRIMARY KEY,
+                    name TEXT,
+                    weakness_abstraction TEXT,
+                    status TEXT,
+                    description TEXT,
+                    extended_description TEXT,
+                    last_updated TEXT
+                )
+            """)
             conn.commit()
     
     def store_cve(self, cve_data: Dict) -> bool:
@@ -81,17 +99,22 @@ class CVEDatabase:
                 conn.execute("""
                     INSERT OR REPLACE INTO cve_data 
                     (cve_id, published_date, last_modified, cvss_v3_score, cvss_v3_severity,
-                     cvss_v2_score, cvss_v2_severity, description, references, cwe_ids,
+                     cvss_v3_vector, cvss_v3_details, cvss_v2_score, cvss_v2_severity,
+                     cvss_v2_vector, cvss_v2_details, description, reference_urls, cwe_ids,
                      vendor_name, product_name, raw_data)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     cve_data.get('id'),
                     cve_data.get('published'),
                     cve_data.get('lastModified'),
                     cve_data.get('cvss_v3_score'),
                     cve_data.get('cvss_v3_severity'),
+                    cve_data.get('cvss_v3_vector'),
+                    json.dumps(cve_data.get('cvss_v3_details', {})),
                     cve_data.get('cvss_v2_score'),
                     cve_data.get('cvss_v2_severity'),
+                    cve_data.get('cvss_v2_vector'),
+                    json.dumps(cve_data.get('cvss_v2_details', {})),
                     cve_data.get('description'),
                     json.dumps(cve_data.get('references', [])),
                     json.dumps(cve_data.get('cwe_ids', [])),
@@ -103,6 +126,29 @@ class CVEDatabase:
                 return True
         except Exception as e:
             print(f"Error storing CVE data: {e}")
+            return False
+
+    def store_cwe(self, cwe_data: Dict) -> bool:
+        """Store CWE data in the local database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO cwe_data 
+                    (cwe_id, name, weakness_abstraction, status, description, extended_description, last_updated)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    f"CWE-{cwe_data.get('CWE-ID')}",
+                    cwe_data.get('Name'),
+                    cwe_data.get('Weakness Abstraction'),
+                    cwe_data.get('Status'),
+                    cwe_data.get('Description'),
+                    cwe_data.get('Extended Description'),
+                    datetime.now().isoformat()
+                ))
+                conn.commit()
+                return True
+        except Exception as e:
+            print(f"Error storing CWE data: {e}")
             return False
     
     def get_cve(self, cve_id: str) -> Optional[Dict]:
@@ -119,6 +165,41 @@ class CVEDatabase:
         except Exception as e:
             print(f"Error retrieving CVE data: {e}")
             return None
+
+    def get_cwe(self, cwe_id: str) -> Optional[Dict]:
+        """Retrieve CWE data from the local database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    "SELECT cwe_id, name, weakness_abstraction, status, description, extended_description FROM cwe_data WHERE cwe_id = ?", 
+                    (cwe_id,)
+                )
+                result = cursor.fetchone()
+                if result:
+                    return {
+                        'cwe_id': result[0],
+                        'name': result[1],
+                        'weakness_abstraction': result[2],
+                        'status': result[3],
+                        'description': result[4],
+                        'extended_description': result[5],
+                        'source': 'database'
+                    }
+                return None
+        except Exception as e:
+            print(f"Error retrieving CWE data: {e}")
+            return None
+
+    def get_cwe_count(self) -> int:
+        """Get the number of CWE entries in the database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("SELECT COUNT(*) FROM cwe_data")
+                result = cursor.fetchone()
+                return result[0] if result else 0
+        except Exception as e:
+            print(f"Error counting CWE entries: {e}")
+            return 0
     
     def store_feed_metadata(self, feed_name: str, last_modified: str, sha256: str):
         """Store feed metadata to track updates"""
@@ -424,6 +505,23 @@ class NVDClient:
             cve_data['cvss_v3_score'] = cvss_data.get('baseScore')
             cve_data['cvss_v3_severity'] = cvss_data.get('baseSeverity')
             cve_data['cvss_v3_vector'] = cvss_data.get('vectorString')
+            
+            # Extract detailed CVSS v3 components
+            cve_data['cvss_v3_details'] = {
+                'version': cvss_data.get('version'),
+                'attackVector': cvss_data.get('attackVector'),
+                'attackComplexity': cvss_data.get('attackComplexity'),
+                'privilegesRequired': cvss_data.get('privilegesRequired'),
+                'userInteraction': cvss_data.get('userInteraction'),
+                'scope': cvss_data.get('scope'),
+                'confidentialityImpact': cvss_data.get('confidentialityImpact'),
+                'integrityImpact': cvss_data.get('integrityImpact'),
+                'availabilityImpact': cvss_data.get('availabilityImpact'),
+                'baseScore': cvss_data.get('baseScore'),
+                'baseSeverity': cvss_data.get('baseSeverity'),
+                'exploitabilityScore': cvss_data.get('exploitabilityScore'),
+                'impactScore': cvss_data.get('impactScore')
+            }
         
         # CVSS v2
         cvss_v2 = metrics.get('cvssMetricV2')
@@ -432,6 +530,21 @@ class NVDClient:
             cve_data['cvss_v2_score'] = cvss_data.get('baseScore')
             cve_data['cvss_v2_severity'] = cvss_data.get('baseSeverity')
             cve_data['cvss_v2_vector'] = cvss_data.get('vectorString')
+            
+            # Extract detailed CVSS v2 components
+            cve_data['cvss_v2_details'] = {
+                'version': cvss_data.get('version'),
+                'accessVector': cvss_data.get('accessVector'),
+                'accessComplexity': cvss_data.get('accessComplexity'),
+                'authentication': cvss_data.get('authentication'),
+                'confidentialityImpact': cvss_data.get('confidentialityImpact'),
+                'integrityImpact': cvss_data.get('integrityImpact'),
+                'availabilityImpact': cvss_data.get('availabilityImpact'),
+                'baseScore': cvss_data.get('baseScore'),
+                'baseSeverity': cvss_data.get('baseSeverity'),
+                'exploitabilityScore': cvss_data.get('exploitabilityScore'),
+                'impactScore': cvss_data.get('impactScore')
+            }
         
         # CWE information
         weaknesses = cve.get('weaknesses', [])
@@ -476,12 +589,12 @@ class NVDClient:
 class CWEClient:
     """Client for Common Weakness Enumeration (CWE) information"""
     
-    def __init__(self):
-        # Common CWE mappings - this could be expanded or loaded from a file
-        self.cwe_mappings = {
-            'CWE-1': 'Location',
-            'CWE-2': '7PK - Environment',
-            'CWE-3': '7PK - Time and State',
+    def __init__(self, use_local_db: bool = True):
+        self.use_local_db = use_local_db
+        self.db = CVEDatabase() if use_local_db else None
+        
+        # Fallback CWE mappings for cases where database is not available
+        self.fallback_mappings = {
             'CWE-20': 'Improper Input Validation',
             'CWE-22': 'Improper Limitation of a Pathname to a Restricted Directory (Path Traversal)',
             'CWE-79': 'Improper Neutralization of Input During Web Page Generation (Cross-site Scripting)',
@@ -504,6 +617,46 @@ class CWEClient:
             'CWE-918': 'Server-Side Request Forgery (SSRF)',
         }
     
+    def download_and_import_cwe_data(self) -> bool:
+        """
+        Download the latest CWE data from MITRE and import it into the database
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.use_local_db or not self.db:
+            print("Local database not available for CWE import")
+            return False
+            
+        try:
+            print("Downloading CWE data from MITRE...")
+            url = "https://cwe.mitre.org/data/csv/699.csv.zip"
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            
+            print("Extracting and parsing CWE data...")
+            with zipfile.ZipFile(io.BytesIO(response.content)) as zip_file:
+                csv_filename = "699.csv"
+                if csv_filename in zip_file.namelist():
+                    csv_content = zip_file.read(csv_filename).decode('utf-8')
+                    csv_reader = csv.DictReader(io.StringIO(csv_content))
+                    
+                    imported_count = 0
+                    for row in csv_reader:
+                        if row.get('CWE-ID') and row.get('Name'):
+                            if self.db.store_cwe(row):
+                                imported_count += 1
+                    
+                    print(f"Successfully imported {imported_count} CWE entries")
+                    return True
+                else:
+                    print(f"CSV file {csv_filename} not found in ZIP")
+                    return False
+                    
+        except Exception as e:
+            print(f"Error downloading/importing CWE data: {e}")
+            return False
+    
     def get_cwe_info(self, cwe_id: Union[str, int]) -> Optional[Dict]:
         """
         Get CWE information
@@ -524,23 +677,27 @@ class CWEClient:
             else:
                 cwe_key = cwe_id
         
-        # Look up in our mappings
-        description = self.cwe_mappings.get(cwe_key)
+        # Try database first if available
+        if self.use_local_db and self.db:
+            cwe_data = self.db.get_cwe(cwe_key)
+            if cwe_data:
+                return cwe_data
         
+        # Fallback to built-in mappings
+        description = self.fallback_mappings.get(cwe_key)
         if description:
             return {
                 'cwe_id': cwe_key,
                 'name': description,
-                'source': 'built-in mapping'
+                'source': 'fallback mapping'
             }
-        else:
-            # For unmapped CWEs, we could potentially query MITRE's CWE database
-            # For now, return basic info
-            return {
-                'cwe_id': cwe_key,
-                'name': f'Unknown CWE (not in built-in mapping)',
-                'source': 'unknown'
-            }
+        
+        # Return unknown CWE info
+        return {
+            'cwe_id': cwe_key,
+            'name': f'Unknown CWE (not in database or fallback mapping)',
+            'source': 'unknown'
+        }
 
 
 def get_cve_info(cve_id: str, api_key: Optional[str] = None, use_local_db: bool = True, force_api: bool = False) -> Optional[Dict]:
@@ -596,6 +753,222 @@ def get_cvss_score(cve_id: str, version: str = 'v3', **kwargs) -> Optional[float
         return cve_data.get('cvss_v3_score')
 
 
+def get_cvss_vector(cve_id: str, version: str = 'v3', **kwargs) -> Optional[str]:
+    """
+    Get CVSS vector string for a CVE
+    
+    Args:
+        cve_id: CVE identifier
+        version: CVSS version ('v2' or 'v3')
+        **kwargs: Additional arguments passed to get_cve_info
+        
+    Returns:
+        CVSS vector string or None if not found
+    """
+    cve_data = get_cve_info(cve_id, **kwargs)
+    if not cve_data:
+        return None
+    
+    if version.lower() == 'v2':
+        return cve_data.get('cvss_v2_vector')
+    else:
+        return cve_data.get('cvss_v3_vector')
+
+
+def get_cvss_details(cve_id: str, version: str = 'v3', **kwargs) -> Optional[Dict]:
+    """
+    Get detailed CVSS components for a CVE
+    
+    Args:
+        cve_id: CVE identifier
+        version: CVSS version ('v2' or 'v3')
+        **kwargs: Additional arguments passed to get_cve_info
+        
+    Returns:
+        Dictionary containing detailed CVSS components or None if not found
+    """
+    cve_data = get_cve_info(cve_id, **kwargs)
+    if not cve_data:
+        return None
+    
+    if version.lower() == 'v2':
+        return cve_data.get('cvss_v2_details')
+    else:
+        return cve_data.get('cvss_v3_details')
+
+
+def parse_cvss_vector(vector_string: str) -> Optional[Dict]:
+    """
+    Parse a CVSS vector string into its components
+    
+    Args:
+        vector_string: CVSS vector string (e.g., "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H")
+        
+    Returns:
+        Dictionary with parsed components or None if invalid
+    """
+    if not vector_string:
+        return None
+    
+    try:
+        # Remove the CVSS version prefix
+        if vector_string.startswith('CVSS:'):
+            parts = vector_string.split('/', 1)
+            if len(parts) > 1:
+                version = parts[0].replace('CVSS:', '')
+                vector_parts = parts[1].split('/')
+            else:
+                return None
+        else:
+            vector_parts = vector_string.split('/')
+            version = 'unknown'
+        
+        components = {'version': version}
+        
+        # CVSS v3.x mappings
+        v3_mappings = {
+            'AV': 'attackVector',
+            'AC': 'attackComplexity', 
+            'PR': 'privilegesRequired',
+            'UI': 'userInteraction',
+            'S': 'scope',
+            'C': 'confidentialityImpact',
+            'I': 'integrityImpact',
+            'A': 'availabilityImpact'
+        }
+        
+        # CVSS v2 mappings
+        v2_mappings = {
+            'AV': 'accessVector',
+            'AC': 'accessComplexity',
+            'Au': 'authentication',
+            'C': 'confidentialityImpact',
+            'I': 'integrityImpact',
+            'A': 'availabilityImpact'
+        }
+        
+        # Value mappings for human-readable output
+        value_mappings = {
+            # Attack/Access Vector
+            'N': 'NETWORK',
+            'A': 'ADJACENT_NETWORK',
+            'L': 'LOCAL',
+            'P': 'PHYSICAL',
+            # Attack/Access Complexity
+            'L': 'LOW',
+            'H': 'HIGH',
+            # Privileges Required / Authentication
+            'N': 'NONE',
+            'L': 'LOW',
+            'H': 'HIGH',
+            'S': 'SINGLE',
+            'M': 'MULTIPLE',
+            # User Interaction
+            'N': 'NONE',
+            'R': 'REQUIRED',
+            # Scope
+            'U': 'UNCHANGED',
+            'C': 'CHANGED',
+            # Impact levels
+            'N': 'NONE',
+            'L': 'LOW',
+            'H': 'HIGH'
+        }
+        
+        # Determine which mapping to use based on version
+        if version.startswith('3'):
+            metric_mappings = v3_mappings
+        else:
+            metric_mappings = v2_mappings
+        
+        for part in vector_parts:
+            if ':' in part:
+                key, value = part.split(':', 1)
+                metric_name = metric_mappings.get(key, key)
+                readable_value = value_mappings.get(value, value)
+                components[metric_name] = readable_value
+        
+        return components
+        
+    except Exception:
+        return None
+
+
+def analyze_cvss_risk(cve_id: str, version: str = 'v3', **kwargs) -> Optional[Dict]:
+    """
+    Analyze CVSS risk factors for a CVE
+    
+    Args:
+        cve_id: CVE identifier
+        version: CVSS version ('v2' or 'v3')
+        **kwargs: Additional arguments passed to get_cve_info
+        
+    Returns:
+        Dictionary with risk analysis or None if not found
+    """
+    cvss_details = get_cvss_details(cve_id, version, **kwargs)
+    if not cvss_details:
+        return None
+    
+    risk_factors = {
+        'cve_id': cve_id,
+        'cvss_version': version,
+        'base_score': cvss_details.get('baseScore'),
+        'severity': cvss_details.get('baseSeverity'),
+        'risk_factors': []
+    }
+    
+    if version.lower() == 'v3':
+        # Analyze v3 risk factors
+        if cvss_details.get('attackVector') == 'NETWORK':
+            risk_factors['risk_factors'].append('Network accessible')
+        
+        if cvss_details.get('attackComplexity') == 'LOW':
+            risk_factors['risk_factors'].append('Low attack complexity')
+            
+        if cvss_details.get('privilegesRequired') == 'NONE':
+            risk_factors['risk_factors'].append('No privileges required')
+            
+        if cvss_details.get('userInteraction') == 'NONE':
+            risk_factors['risk_factors'].append('No user interaction required')
+            
+        if cvss_details.get('scope') == 'CHANGED':
+            risk_factors['risk_factors'].append('Scope changed (privilege escalation)')
+            
+        # Check impact levels
+        high_impacts = []
+        for impact_type in ['confidentialityImpact', 'integrityImpact', 'availabilityImpact']:
+            if cvss_details.get(impact_type) == 'HIGH':
+                impact_name = impact_type.replace('Impact', '').capitalize()
+                high_impacts.append(impact_name)
+        
+        if high_impacts:
+            risk_factors['risk_factors'].append(f'High impact on: {", ".join(high_impacts)}')
+    
+    else:
+        # Analyze v2 risk factors
+        if cvss_details.get('accessVector') == 'NETWORK':
+            risk_factors['risk_factors'].append('Network accessible')
+            
+        if cvss_details.get('accessComplexity') == 'LOW':
+            risk_factors['risk_factors'].append('Low access complexity')
+            
+        if cvss_details.get('authentication') == 'NONE':
+            risk_factors['risk_factors'].append('No authentication required')
+            
+        # Check impact levels
+        high_impacts = []
+        for impact_type in ['confidentialityImpact', 'integrityImpact', 'availabilityImpact']:
+            if cvss_details.get(impact_type) == 'COMPLETE':
+                impact_name = impact_type.replace('Impact', '').capitalize()
+                high_impacts.append(impact_name)
+        
+        if high_impacts:
+            risk_factors['risk_factors'].append(f'Complete impact on: {", ".join(high_impacts)}')
+    
+    return risk_factors
+
+
 def update_database(years: Optional[List[int]] = None, include_modified: bool = True):
     """
     Update local database from NVD feeds
@@ -608,6 +981,17 @@ def update_database(years: Optional[List[int]] = None, include_modified: bool = 
     feed_manager.update_database_from_feeds(years=years, include_modified=include_modified)
 
 
+def update_cwe_database() -> bool:
+    """
+    Update the local database with the latest CWE data from MITRE (module function)
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    client = CWEClient()
+    return client.download_and_import_cwe_data()
+
+
 def print_cve_info(cve_data: Dict):
     """Pretty print CVE information"""
     print(f"\n=== {cve_data['id']} ===")
@@ -617,9 +1001,13 @@ def print_cve_info(cve_data: Dict):
     
     if cve_data.get('cvss_v3_score'):
         print(f"CVSS v3 Score: {cve_data['cvss_v3_score']} ({cve_data.get('cvss_v3_severity', 'N/A')})")
+        if cve_data.get('cvss_v3_vector'):
+            print(f"CVSS v3 Vector: {cve_data['cvss_v3_vector']}")
     
     if cve_data.get('cvss_v2_score'):
         print(f"CVSS v2 Score: {cve_data['cvss_v2_score']} ({cve_data.get('cvss_v2_severity', 'N/A')})")
+        if cve_data.get('cvss_v2_vector'):
+            print(f"CVSS v2 Vector: {cve_data['cvss_v2_vector']}")
     
     print(f"Vendor: {cve_data.get('vendor_name', 'N/A')}")
     print(f"Product: {cve_data.get('product_name', 'N/A')}")
@@ -636,11 +1024,83 @@ def print_cve_info(cve_data: Dict):
             print(f"  - {ref['url']}")
 
 
+def print_cvss_details(cve_id: str, version: str = 'v3', **kwargs):
+    """Pretty print detailed CVSS information"""
+    cvss_details = get_cvss_details(cve_id, version, **kwargs)
+    vector = get_cvss_vector(cve_id, version, **kwargs)
+    
+    if not cvss_details:
+        print(f"No CVSS {version.upper()} details found for {cve_id}")
+        return
+    
+    print(f"\n=== CVSS {version.upper()} Details for {cve_id} ===")
+    print(f"Vector String: {vector or 'N/A'}")
+    print(f"Base Score: {cvss_details.get('baseScore', 'N/A')}")
+    print(f"Severity: {cvss_details.get('baseSeverity', 'N/A')}")
+    
+    if version.lower() == 'v3':
+        print(f"\nAttack Vector: {cvss_details.get('attackVector', 'N/A')}")
+        print(f"Attack Complexity: {cvss_details.get('attackComplexity', 'N/A')}")
+        print(f"Privileges Required: {cvss_details.get('privilegesRequired', 'N/A')}")
+        print(f"User Interaction: {cvss_details.get('userInteraction', 'N/A')}")
+        print(f"Scope: {cvss_details.get('scope', 'N/A')}")
+        print(f"Confidentiality Impact: {cvss_details.get('confidentialityImpact', 'N/A')}")
+        print(f"Integrity Impact: {cvss_details.get('integrityImpact', 'N/A')}")
+        print(f"Availability Impact: {cvss_details.get('availabilityImpact', 'N/A')}")
+    else:
+        print(f"\nAccess Vector: {cvss_details.get('accessVector', 'N/A')}")
+        print(f"Access Complexity: {cvss_details.get('accessComplexity', 'N/A')}")
+        print(f"Authentication: {cvss_details.get('authentication', 'N/A')}")
+        print(f"Confidentiality Impact: {cvss_details.get('confidentialityImpact', 'N/A')}")
+        print(f"Integrity Impact: {cvss_details.get('integrityImpact', 'N/A')}")
+        print(f"Availability Impact: {cvss_details.get('availabilityImpact', 'N/A')}")
+    
+    if cvss_details.get('exploitabilityScore'):
+        print(f"Exploitability Score: {cvss_details['exploitabilityScore']}")
+    if cvss_details.get('impactScore'):
+        print(f"Impact Score: {cvss_details['impactScore']}")
+
+
+def print_cvss_risk_analysis(cve_id: str, version: str = 'v3', **kwargs):
+    """Pretty print CVSS risk analysis"""
+    risk_analysis = analyze_cvss_risk(cve_id, version, **kwargs)
+    
+    if not risk_analysis:
+        print(f"No CVSS {version.upper()} risk analysis available for {cve_id}")
+        return
+    
+    print(f"\n=== CVSS {version.upper()} Risk Analysis for {cve_id} ===")
+    print(f"Base Score: {risk_analysis.get('base_score', 'N/A')}")
+    print(f"Severity: {risk_analysis.get('severity', 'N/A')}")
+    
+    if risk_analysis.get('risk_factors'):
+        print(f"\nKey Risk Factors:")
+        for factor in risk_analysis['risk_factors']:
+            print(f"  • {factor}")
+    else:
+        print(f"\nNo significant risk factors identified.")
+
+
 def print_cwe_info(cwe_data: Dict):
     """Pretty print CWE information"""
     print(f"\n=== {cwe_data['cwe_id']} ===")
     print(f"Name: {cwe_data['name']}")
-    print(f"Source: {cwe_data['source']}")
+    
+    if cwe_data.get('weakness_abstraction'):
+        print(f"Weakness Abstraction: {cwe_data['weakness_abstraction']}")
+    
+    if cwe_data.get('status'):
+        print(f"Status: {cwe_data['status']}")
+    
+    if cwe_data.get('description'):
+        print(f"\nDescription:")
+        print(f"{cwe_data['description']}")
+    
+    if cwe_data.get('extended_description'):
+        print(f"\nExtended Description:")
+        print(f"{cwe_data['extended_description']}")
+    
+    print(f"\nSource: {cwe_data['source']}")
 
 
 def main():
@@ -655,6 +1115,7 @@ def main():
     
     # Database management
     parser.add_argument('--update-db', action='store_true', help='Update local database from NVD feeds')
+    parser.add_argument('--update-cwe', action='store_true', help='Update local database with latest CWE data from MITRE')
     parser.add_argument('--years', type=int, nargs='+', help='Years to download (default: current and previous year)')
     parser.add_argument('--no-modified', action='store_true', help='Skip modified and recent feeds when updating')
     
@@ -666,6 +1127,8 @@ def main():
     # Output options
     parser.add_argument('--json', action='store_true', help='Output in JSON format')
     parser.add_argument('--cvss-only', action='store_true', help='Output only CVSS score')
+    parser.add_argument('--cvss-details', action='store_true', help='Show detailed CVSS vector components')
+    parser.add_argument('--cvss-risk', action='store_true', help='Show CVSS risk analysis')
     
     args = parser.parse_args()
     
@@ -675,6 +1138,18 @@ def main():
             years=args.years, 
             include_modified=not args.no_modified
         )
+        return
+    
+    if args.update_cwe:
+        print("Updating local database with latest CWE data...")
+        success = update_cwe_database()
+        if success:
+            db = CVEDatabase()
+            count = db.get_cwe_count()
+            print(f"CWE database update completed. Total CWE entries: {count}")
+        else:
+            print("CWE database update failed.")
+            sys.exit(1)
         return
     
     if not args.cve and not args.cwe:
@@ -698,6 +1173,22 @@ def main():
             if args.cvss_only:
                 cvss_score = cve_data.get('cvss_v3_score') or cve_data.get('cvss_v2_score')
                 print(cvss_score if cvss_score else 'N/A')
+            elif args.cvss_details:
+                # Show detailed CVSS components
+                if cve_data.get('cvss_v3_score'):
+                    print_cvss_details(args.cve, 'v3', api_key=args.api_key, 
+                                     use_local_db=not args.no_local_db, force_api=args.force_api)
+                if cve_data.get('cvss_v2_score'):
+                    print_cvss_details(args.cve, 'v2', api_key=args.api_key,
+                                     use_local_db=not args.no_local_db, force_api=args.force_api)
+            elif args.cvss_risk:
+                # Show CVSS risk analysis
+                if cve_data.get('cvss_v3_score'):
+                    print_cvss_risk_analysis(args.cve, 'v3', api_key=args.api_key,
+                                           use_local_db=not args.no_local_db, force_api=args.force_api)
+                if cve_data.get('cvss_v2_score'):
+                    print_cvss_risk_analysis(args.cve, 'v2', api_key=args.api_key,
+                                           use_local_db=not args.no_local_db, force_api=args.force_api)
             elif args.json:
                 print(json.dumps(cve_data, indent=2))
             else:
