@@ -18,7 +18,7 @@ import uvicorn
 from seevee import (
     get_cve_info, get_cwe_info, get_cvss_score, get_cvss_vector, 
     get_cvss_details, analyze_cvss_risk, update_database, update_cwe_database,
-    CVEDatabase, format_duration
+    CVEDatabase, format_duration, enrich_cve_with_cwe_details
 )
 
 
@@ -229,8 +229,8 @@ async def lookup_cve(
     try:
         start_time = time.time()
         
-        # Get basic CVE info
-        cve_data = get_cve_info(cve_id.upper())
+        # Get basic CVE info with CWE details
+        cve_data = get_cve_info(cve_id.upper(), include_cwe_details=True)
         
         if not cve_data:
             return CVEResponse(
@@ -288,8 +288,8 @@ async def batch_lookup_cve(request: CVERequest):
     
     for cve_id in request.cve_ids:
         try:
-            # Get basic CVE info
-            cve_data = get_cve_info(cve_id.upper())
+            # Get basic CVE info with CWE details
+            cve_data = get_cve_info(cve_id.upper(), include_cwe_details=True)
             
             if not cve_data:
                 results.append(CVEResponse(
