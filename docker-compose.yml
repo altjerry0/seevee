@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  seevee-api:
+    build: .
+    container_name: seevee-api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount existing database for testing (comment out for fresh start)
+      - ./cve_database.db:/app/cve_database.db
+      # Persist data directory
+      - ./data:/app/data
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - UPDATE_DB_ON_STARTUP=true
+      # Set to "false" to skip database update on startup (useful for testing)
+      # - UPDATE_DB_ON_STARTUP=false
+      # Quick update mode - only update recent years (faster startup)
+      # - SKIP_YEARS=2002,2003,2004,2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  # Optional: Add PostgreSQL if you want to upgrade from SQLite later
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: seevee-postgres
+  #   environment:
+  #     POSTGRES_DB: seevee
+  #     POSTGRES_USER: seevee
+  #     POSTGRES_PASSWORD: seevee_password
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+  #   restart: unless-stopped
+
+# volumes:
+#   postgres_data: 

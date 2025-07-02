@@ -797,7 +797,7 @@ class CWEClient:
         }
 
 
-def get_cve_info(cve_id: str, api_key: Optional[str] = None, use_local_db: bool = True, force_api: bool = False) -> Optional[Dict]:
+def get_cve_info(cve_id: str, api_key: Optional[str] = None, use_local_db: bool = True, force_api: bool = False, include_cwe_details: bool = False) -> Optional[Dict]:
     """
     Get CVE information (module function)
     
@@ -806,12 +806,59 @@ def get_cve_info(cve_id: str, api_key: Optional[str] = None, use_local_db: bool 
         api_key: NVD API key (optional)
         use_local_db: Whether to use local database
         force_api: Force API call even if local data exists
+        include_cwe_details: Whether to include detailed CWE information
         
     Returns:
         Dictionary containing CVE information or None if not found
     """
     client = NVDClient(api_key=api_key, use_local_db=use_local_db)
-    return client.get_cve_info(cve_id, force_api=force_api)
+    cve_data = client.get_cve_info(cve_id, force_api=force_api)
+    
+    if cve_data and include_cwe_details:
+        cve_data = enrich_cve_with_cwe_details(cve_data, include_cwe_details)
+    
+    return cve_data
+
+
+def enrich_cve_with_cwe_details(cve_data: Dict, include_cwe_details: bool = True) -> Dict:
+    """
+    Enrich CVE data with detailed CWE information
+    
+    Args:
+        cve_data: CVE data dictionary
+        include_cwe_details: Whether to include detailed CWE information
+        
+    Returns:
+        Enhanced CVE data with CWE details
+    """
+    if not include_cwe_details or not cve_data.get('cwe_ids'):
+        return cve_data
+    
+    cwe_client = CWEClient()
+    cwe_details = []
+    
+    for cwe_id in cve_data.get('cwe_ids', []):
+        cwe_info = cwe_client.get_cwe_info(cwe_id)
+        if cwe_info:
+            cwe_details.append({
+                'cwe_id': cwe_info['cwe_id'],
+                'name': cwe_info['name'],
+                'weakness_abstraction': cwe_info.get('weakness_abstraction'),
+                'status': cwe_info.get('status'),
+                'source': cwe_info.get('source')
+            })
+        else:
+            # Fallback for unknown CWEs
+            cwe_details.append({
+                'cwe_id': cwe_id,
+                'name': 'Unknown CWE',
+                'source': 'unknown'
+            })
+    
+    # Add enriched CWE details while preserving original cwe_ids
+    enhanced_cve_data = cve_data.copy()
+    enhanced_cve_data['cwe_details'] = cwe_details
+    return enhanced_cve_data
 
 
 def get_cwe_info(cwe_id: Union[str, int]) -> Optional[Dict]:
@@ -1124,7 +1171,13 @@ def print_cve_info(cve_data: Dict):
     print(f"Vendor: {cve_data.get('vendor_name', 'N/A')}")
     print(f"Product: {cve_data.get('product_name', 'N/A')}")
     
-    if cve_data.get('cwe_ids'):
+    if cve_data.get('cwe_details'):
+        # Show detailed CWE information
+        print(f"CWE Information:")
+        for cwe in cve_data['cwe_details']:
+            print(f"  {cwe['cwe_id']}: {cwe['name']}")
+    elif cve_data.get('cwe_ids'):
+        # Fallback to just CWE IDs if no detailed info
         print(f"CWE IDs: {', '.join(cve_data['cwe_ids'])}")
     
     print(f"\nDescription:")
@@ -1275,7 +1328,8 @@ def main():
                 args.cve,
                 api_key=args.api_key,
                 use_local_db=not args.no_local_db,
-                force_api=args.force_api
+                force_api=args.force_api,
+                include_cwe_details=True  # Enable CWE details by default for CLI
             )
             
             if not cve_data:
