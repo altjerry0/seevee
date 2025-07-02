@@ -29,6 +29,7 @@ from urllib.parse import quote, urlparse
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from tqdm import tqdm
 
 
 class SeeVeeError(Exception):
@@ -259,8 +260,11 @@ class NVDFeedManager:
         session.mount("https://", adapter)
         
         session.headers.update({
-            'User-Agent': 'SeeVee/1.0',
-            'Accept': 'application/json'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive'
         })
         
         return session
@@ -299,24 +303,39 @@ class NVDFeedManager:
             url = f"{self.FEED_BASE_URL}/{feed_name}.json.{format_type}"
             print(f"Downloading {feed_name} feed...")
             
-            response = self.session.get(url, timeout=300)  # 5 minute timeout for large files
+            # Download with progress bar
+            response = self.session.get(url, timeout=300, stream=True)  # 5 minute timeout for large files
             response.raise_for_status()
             
+            # Get total file size if available
+            total_size = int(response.headers.get('content-length', 0))
+            
+            # Download with progress bar
+            downloaded_data = b""
+            with tqdm(total=total_size, unit='B', unit_scale=True, desc=f"Downloading {feed_name}") as pbar:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        downloaded_data += chunk
+                        pbar.update(len(chunk))
+            
             # Extract and parse the data
+            print(f"Extracting and parsing {feed_name}...")
             if format_type == 'gz':
-                data = gzip.decompress(response.content).decode('utf-8')
+                data = gzip.decompress(downloaded_data).decode('utf-8')
             elif format_type == 'zip':
-                with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+                with zipfile.ZipFile(io.BytesIO(downloaded_data)) as zf:
                     data = zf.read(f"{feed_name}.json").decode('utf-8')
             else:
-                data = response.text
+                data = downloaded_data.decode('utf-8')
             
             # Verify SHA256 if available
             if self.use_local_db and remote_meta and 'sha256' in remote_meta:
+                print("Verifying file integrity...")
                 actual_hash = hashlib.sha256(data.encode('utf-8')).hexdigest()
                 if actual_hash != remote_meta['sha256']:
                     print(f"Warning: SHA256 mismatch for {feed_name}")
             
+            print("Parsing JSON data...")
             feed_data = json.loads(data)
             vulnerabilities = feed_data.get('vulnerabilities', [])
             
@@ -362,27 +381,37 @@ class NVDFeedManager:
         print(f"Updating database from feeds: {feeds_to_download}")
         
         total_imported = 0
-        for feed_name in feeds_to_download:
-            vulnerabilities = self.download_feed(feed_name)
-            if vulnerabilities:
-                imported = self._import_vulnerabilities(vulnerabilities)
-                total_imported += imported
-                print(f"Imported {imported} vulnerabilities from {feed_name}")
+        with tqdm(total=len(feeds_to_download), desc="Processing feeds", unit="feed") as feed_pbar:
+            for feed_name in feeds_to_download:
+                feed_pbar.set_description(f"Processing {feed_name}")
+                vulnerabilities = self.download_feed(feed_name)
+                if vulnerabilities:
+                    imported = self._import_vulnerabilities(vulnerabilities)
+                    total_imported += imported
+                    tqdm.write(f"Imported {imported} vulnerabilities from {feed_name}")
+                else:
+                    tqdm.write(f"No new data to import from {feed_name}")
+                feed_pbar.update(1)
         
-        print(f"Total vulnerabilities imported: {total_imported}")
+        print(f"\nTotal vulnerabilities imported: {total_imported}")
     
     def _import_vulnerabilities(self, vulnerabilities: List[Dict]) -> int:
         """Import vulnerabilities into the database"""
         imported_count = 0
         client = NVDClient(use_local_db=True)
         
-        for vuln in vulnerabilities:
-            try:
-                cve_data = client._parse_cve_data(vuln)
-                if self.db.store_cve(cve_data):
-                    imported_count += 1
-            except Exception as e:
-                print(f"Error importing vulnerability {vuln.get('cve', {}).get('id', 'unknown')}: {e}")
+        # Import with progress bar
+        with tqdm(total=len(vulnerabilities), desc="Importing vulnerabilities", unit="CVE") as pbar:
+            for vuln in vulnerabilities:
+                try:
+                    cve_data = client._parse_cve_data(vuln)
+                    if self.db.store_cve(cve_data):
+                        imported_count += 1
+                except Exception as e:
+                    cve_id = vuln.get('cve', {}).get('id', 'unknown')
+                    tqdm.write(f"Error importing vulnerability {cve_id}: {e}")
+                finally:
+                    pbar.update(1)
         
         return imported_count
 
@@ -412,8 +441,11 @@ class NVDClient:
         session.mount("https://", adapter)
         
         headers = {
-            'User-Agent': 'SeeVee/1.0',
-            'Accept': 'application/json'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive'
         }
         if self.api_key:
             headers['apiKey'] = self.api_key
@@ -631,7 +663,14 @@ class CWEClient:
         try:
             print("Downloading CWE data from MITRE...")
             url = "https://cwe.mitre.org/data/csv/699.csv.zip"
-            response = requests.get(url, timeout=30)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'application/zip, */*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive'
+            }
+            response = requests.get(url, headers=headers, timeout=30)
             response.raise_for_status()
             
             print("Extracting and parsing CWE data...")
@@ -641,11 +680,17 @@ class CWEClient:
                     csv_content = zip_file.read(csv_filename).decode('utf-8')
                     csv_reader = csv.DictReader(io.StringIO(csv_content))
                     
+                    # Convert to list to get count for progress bar
+                    rows = list(csv_reader)
+                    print(f"Processing {len(rows)} CWE entries...")
+                    
                     imported_count = 0
-                    for row in csv_reader:
-                        if row.get('CWE-ID') and row.get('Name'):
-                            if self.db.store_cwe(row):
-                                imported_count += 1
+                    with tqdm(total=len(rows), desc="Importing CWE entries", unit="CWE") as pbar:
+                        for row in rows:
+                            if row.get('CWE-ID') and row.get('Name'):
+                                if self.db.store_cwe(row):
+                                    imported_count += 1
+                            pbar.update(1)
                     
                     print(f"Successfully imported {imported_count} CWE entries")
                     return True

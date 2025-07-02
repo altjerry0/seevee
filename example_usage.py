@@ -122,13 +122,41 @@ def demonstrate_cwe_analysis():
     print("                        CWE ANALYSIS EXAMPLE")
     print("=" * 80)
     
-    common_cwes = [79, 89, 22, 352, 502, 287, 200]
+    # Check CWE database status
+    from seevee import CVEDatabase
+    db = CVEDatabase()
+    cwe_count = db.get_cwe_count()
     
-    print("Common Web Application Vulnerabilities:")
+    if cwe_count > 0:
+        print(f"CWE Database Status: {cwe_count} entries available from MITRE")
+    else:
+        print("CWE Database Status: Not populated (run 'python seevee.py --update-cwe')")
+    
+    common_cwes = [79, 89, 22, 352, 502, 287, 200, 434]
+    
+    print("\nCommon Web Application Vulnerabilities:")
     for cwe_num in common_cwes:
         cwe_info = get_cwe_info(cwe_num)
         if cwe_info:
             print(f"  {cwe_info['cwe_id']}: {cwe_info['name']}")
+            if cwe_info.get('weakness_abstraction'):
+                print(f"    Abstraction: {cwe_info['weakness_abstraction']}")
+            if cwe_info.get('status'):
+                print(f"    Status: {cwe_info['status']}")
+            print(f"    Source: {cwe_info['source']}")
+            print()
+    
+    # Demonstrate detailed CWE lookup
+    if cwe_count > 0:
+        print("\nDetailed CWE Information Example (from database):")
+        detailed_cwe = get_cwe_info("CWE-79")
+        if detailed_cwe and detailed_cwe.get('description'):
+            print(f"  CWE-79 Description: {detailed_cwe['description'][:200]}...")
+            if detailed_cwe.get('extended_description'):
+                print(f"  Extended: {detailed_cwe['extended_description'][:100]}...")
+    
+    print(f"\nNote: To access the complete MITRE CWE database with 399+ entries,")
+    print("run: python seevee.py --update-cwe")
 
 
 def demonstrate_cvss_analysis():
