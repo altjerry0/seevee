@@ -89,7 +89,9 @@ API_KEY="svu-$(openssl rand -hex 16)-prod"
    UPDATE_DB_ON_STARTUP=true
    CORS_ORIGINS=*
    ```
-5. Note your Railway URL (e.g., `https://seevee-api.railway.app`)
+5. **Start Command**: Railway will automatically use the configuration from `web/deploy/railway.toml`
+   - If deploying manually, set start command to: `cd web/backend && python -m uvicorn app:app --host 0.0.0.0 --port $PORT`
+6. Note your Railway URL (e.g., `https://seevee-api.railway.app`)
 
 #### Option B: Render
 1. Create [Render](https://render.com) account
@@ -210,20 +212,25 @@ curl -H "X-API-Key: your-key" https://your-backend-url.com/stats
 
 ### Common Issues
 
-1. **API Key Mismatch**
+1. **Railway Start Command Missing**
+   - Ensure `web/deploy/railway.toml` contains the start command
+   - Manually set start command: `cd web/backend && python -m uvicorn app:app --host 0.0.0.0 --port $PORT`
+   - Verify Railway is deploying from the correct directory
+
+2. **API Key Mismatch**
    - Verify frontend config matches backend env var
    - Check browser console for 401 errors
 
-2. **CORS Errors**
+3. **CORS Errors**
    - Add frontend domain to `CORS_ORIGINS`
    - Use `*` for development, specific domains for production
 
-3. **Database Update Failures**
+4. **Database Update Failures**
    - Check GitHub Actions logs
    - Verify disk space on deployment platform
    - Try manual trigger
 
-4. **Performance Issues**
+5. **Performance Issues**
    - Enable caching in frontend config
    - Monitor backend response times
    - Consider upgrading hosting plans

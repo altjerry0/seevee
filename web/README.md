@@ -52,6 +52,8 @@ web/
    ENVIRONMENT=production
    UPDATE_DB_ON_STARTUP=true
    ```
+6. **Start Command**: Railway will automatically use the configuration from `web/deploy/railway.toml`
+   - If deploying manually, set start command to: `cd web/backend && python -m uvicorn app:app --host 0.0.0.0 --port $PORT`
 
 #### Option B: Render
 1. Create a [Render](https://render.com) account
