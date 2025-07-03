@@ -2,3 +2,4 @@ cve_database.db
 /__pycache__
 cve_database.db-journal
 start_api.sh
+*.db

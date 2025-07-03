@@ -43,61 +43,109 @@ class CVEDatabase:
     
     def __init__(self, db_path: str = "cve_database.db"):
         self.db_path = Path(db_path)
+        self.is_initialized = False
         self.init_database()
     
     def init_database(self):
         """Initialize the SQLite database with required tables"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS cve_data (
-                    cve_id TEXT PRIMARY KEY,
-                    published_date TEXT,
-                    last_modified TEXT,
-                    cvss_v3_score REAL,
-                    cvss_v3_severity TEXT,
-                    cvss_v3_vector TEXT,
-                    cvss_v3_details TEXT,
-                    cvss_v2_score REAL,
-                    cvss_v2_severity TEXT,
-                    cvss_v2_vector TEXT,
-                    cvss_v2_details TEXT,
-                    description TEXT,
-                    reference_urls TEXT,
-                    cwe_ids TEXT,
-                    vendor_name TEXT,
-                    product_name TEXT,
-                    raw_data TEXT
-                )
-            """)
-            
-            # Table to track feed metadata
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS feed_metadata (
-                    feed_name TEXT PRIMARY KEY,
-                    last_modified TEXT,
-                    sha256 TEXT,
-                    last_updated TEXT
-                )
-            """)
-            
-            # Table for CWE data
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS cwe_data (
-                    cwe_id TEXT PRIMARY KEY,
-                    name TEXT,
-                    weakness_abstraction TEXT,
-                    status TEXT,
-                    description TEXT,
-                    extended_description TEXT,
-                    last_updated TEXT
-                )
-            """)
-            conn.commit()
+        # Try multiple database locations in case of permission issues
+        db_locations = [
+            self.db_path,
+            Path.home() / "seevee_database.db",  # User home directory
+            Path.cwd() / "temp_database.db"      # Temporary alternative
+        ]
+        
+        for db_path in db_locations:
+            try:
+                # Store the working database path
+                self.db_path = db_path
+                
+                # Ensure the parent directory exists
+                self.db_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # If database file exists but is corrupt, try to remove it
+                if self.db_path.exists():
+                    try:
+                        # Test if we can open the existing database
+                        test_conn = sqlite3.connect(str(self.db_path))
+                        test_conn.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                        test_conn.close()
+                    except sqlite3.Error:
+                        # Database is corrupt, try to remove it
+                        try:
+                            print(f"Removing corrupted database file: {self.db_path}")
+                            self.db_path.unlink()
+                        except PermissionError:
+                            print(f"Cannot remove corrupted database due to permissions: {self.db_path}")
+                            # Try next location instead
+                            continue
+                
+                # Create database with proper error handling
+                with sqlite3.connect(str(self.db_path)) as conn:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS cve_data (
+                            cve_id TEXT PRIMARY KEY,
+                            published_date TEXT,
+                            last_modified TEXT,
+                            cvss_v3_score REAL,
+                            cvss_v3_severity TEXT,
+                            cvss_v3_vector TEXT,
+                            cvss_v3_details TEXT,
+                            cvss_v2_score REAL,
+                            cvss_v2_severity TEXT,
+                            cvss_v2_vector TEXT,
+                            cvss_v2_details TEXT,
+                            description TEXT,
+                            reference_urls TEXT,
+                            cwe_ids TEXT,
+                            vendor_name TEXT,
+                            product_name TEXT,
+                            raw_data TEXT
+                        )
+                    """)
+                    
+                    # Table to track feed metadata
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS feed_metadata (
+                            feed_name TEXT PRIMARY KEY,
+                            last_modified TEXT,
+                            sha256 TEXT,
+                            last_updated TEXT
+                        )
+                    """)
+                    
+                    # Table for CWE data
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS cwe_data (
+                            cwe_id TEXT PRIMARY KEY,
+                            name TEXT,
+                            weakness_abstraction TEXT,
+                            status TEXT,
+                            description TEXT,
+                            extended_description TEXT,
+                            last_updated TEXT
+                        )
+                    """)
+                    conn.commit()
+                    self.is_initialized = True
+                    print(f"Database initialized successfully at: {self.db_path}")
+                    return  # Success, exit the loop
+                    
+            except Exception as e:
+                print(f"Could not initialize database at {db_path}: {e}")
+                continue  # Try next location
+        
+        # If we get here, all locations failed
+        print("Warning: Could not initialize database at any location.")
+        print("Database operations will be disabled. The tool will use NVD API instead.")
+        self.is_initialized = False
     
     def store_cve(self, cve_data: Dict) -> bool:
         """Store CVE data in the local database"""
+        if not self.is_initialized:
+            return False
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(str(self.db_path)) as conn:
                 conn.execute("""
                     INSERT OR REPLACE INTO cve_data 
                     (cve_id, published_date, last_modified, cvss_v3_score, cvss_v3_severity,
@@ -132,8 +180,10 @@ class CVEDatabase:
 
     def store_cwe(self, cwe_data: Dict) -> bool:
         """Store CWE data in the local database"""
+        if not self.is_initialized:
+            return False
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(str(self.db_path)) as conn:
                 conn.execute("""
                     INSERT OR REPLACE INTO cwe_data 
                     (cwe_id, name, weakness_abstraction, status, description, extended_description, last_updated)
@@ -155,8 +205,10 @@ class CVEDatabase:
     
     def get_cve(self, cve_id: str) -> Optional[Dict]:
         """Retrieve CVE data from the local database"""
+        if not self.is_initialized:
+            return None
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.execute(
                     "SELECT raw_data FROM cve_data WHERE cve_id = ?", (cve_id,)
                 )
@@ -170,8 +222,10 @@ class CVEDatabase:
 
     def get_cwe(self, cwe_id: str) -> Optional[Dict]:
         """Retrieve CWE data from the local database"""
+        if not self.is_initialized:
+            return None
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.execute(
                     "SELECT cwe_id, name, weakness_abstraction, status, description, extended_description FROM cwe_data WHERE cwe_id = ?", 
                     (cwe_id,)
@@ -194,8 +248,10 @@ class CVEDatabase:
 
     def get_cwe_count(self) -> int:
         """Get the number of CWE entries in the database"""
+        if not self.is_initialized:
+            return 0
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.execute("SELECT COUNT(*) FROM cwe_data")
                 result = cursor.fetchone()
                 return result[0] if result else 0
@@ -205,8 +261,10 @@ class CVEDatabase:
     
     def store_feed_metadata(self, feed_name: str, last_modified: str, sha256: str):
         """Store feed metadata to track updates"""
+        if not self.is_initialized:
+            return
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(str(self.db_path)) as conn:
                 conn.execute("""
                     INSERT OR REPLACE INTO feed_metadata 
                     (feed_name, last_modified, sha256, last_updated)
@@ -218,8 +276,10 @@ class CVEDatabase:
     
     def get_feed_metadata(self, feed_name: str) -> Optional[Dict]:
         """Get stored feed metadata"""
+        if not self.is_initialized:
+            return None
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.execute(
                     "SELECT last_modified, sha256, last_updated FROM feed_metadata WHERE feed_name = ?", 
                     (feed_name,)

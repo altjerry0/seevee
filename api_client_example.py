@@ -80,6 +80,49 @@ class SeeVeeAPIClient:
         return response.json()
 
 
+def display_cve_with_cwe_details(cve_result: Dict[str, Any], show_description: bool = True):
+    """Helper function to display CVE results with enhanced CWE details"""
+    if not cve_result['found']:
+        print(f"   ❌ {cve_result['cve_id']}: {cve_result.get('error', 'Not found')}")
+        return
+    
+    data = cve_result['data']
+    print(f"   ✅ {data['id']}")
+    
+    # Basic CVE info
+    cvss_score = data.get('cvss_v3_score') or data.get('cvss_v2_score', 'N/A')
+    cvss_severity = data.get('cvss_v3_severity') or data.get('cvss_v2_severity', 'N/A')
+    print(f"      CVSS: {cvss_score} ({cvss_severity})")
+    
+    if show_description:
+        description = data.get('description', 'N/A')
+        print(f"      Description: {description[:100]}...")
+    
+    # Enhanced CWE details
+    if data.get('cwe_details'):
+        print(f"      🛡️  CWE Details (Enhanced):")
+        for cwe_info in data['cwe_details']:
+            cwe_id = cwe_info.get('cwe_id', 'Unknown')
+            cwe_name = cwe_info.get('name', 'Unknown')
+            print(f"        • {cwe_id}: {cwe_name}")
+            if cwe_info.get('weakness_abstraction'):
+                print(f"          Abstraction: {cwe_info['weakness_abstraction']}")
+            if cwe_info.get('status'):
+                print(f"          Status: {cwe_info['status']}")
+    elif data.get('cwe_ids'):
+        print(f"      🛡️  CWE IDs: {', '.join(data['cwe_ids'])}")
+    else:
+        print(f"      🛡️  No CWE mappings available")
+    
+    # Risk analysis if available
+    if cve_result.get('risk_analysis', {}).get('v3'):
+        risk_factors = cve_result['risk_analysis']['v3'].get('risk_factors', [])
+        if risk_factors:
+            print(f"      ⚠️   Risk Factors: {len(risk_factors)} identified")
+            for factor in risk_factors[:2]:  # Show first 2
+                print(f"        • {factor}")
+
+
 def main():
     """Example usage of the SeeVee API"""
     
@@ -101,21 +144,23 @@ def main():
         print(f"   Database Size: {stats['database_size_mb']:.1f} MB")
         print(f"   Last Updated: {stats.get('last_updated', 'Unknown')}")
         
-        # Single CVE lookup
-        print("\n🔍 Single CVE Lookup (Log4Shell):")
+        # Single CVE lookup with enhanced CWE details
+        print("\n🔍 Single CVE Lookup with CWE Details (Log4Shell):")
         cve_result = client.lookup_cve("CVE-2021-44228", include_risk_analysis=True)
-        if cve_result['found']:
-            data = cve_result['data']
-            print(f"   CVE: {data['id']}")
-            print(f"   CVSS v3: {data.get('cvss_v3_score', 'N/A')} ({data.get('cvss_v3_severity', 'N/A')})")
-            print(f"   Description: {data.get('description', 'N/A')[:100]}...")
-            
-            if cve_result.get('risk_analysis', {}).get('v3'):
-                risk_factors = cve_result['risk_analysis']['v3'].get('risk_factors', [])
-                if risk_factors:
-                    print(f"   Risk Factors: {len(risk_factors)} identified")
-                    for factor in risk_factors[:3]:  # Show first 3
-                        print(f"     • {factor}")
+        display_cve_with_cwe_details(cve_result)
+        
+        # Demonstrate CWE integration showcase
+        print("\n🛡️  CWE Integration Showcase:")
+        showcase_cves = ["CVE-2021-44228", "CVE-2022-22965", "CVE-2014-0160", "CVE-2017-5638"]
+        print("   Demonstrating enhanced CWE details in CVE responses...")
+        
+        for cve_id in showcase_cves:
+            cve_result = client.lookup_cve(cve_id)
+            if cve_result['found']:
+                data = cve_result['data']
+                cwe_count = len(data.get('cwe_details', {}))
+                basic_cwe_count = len(data.get('cwe_ids', []))
+                print(f"   {cve_id}: {cwe_count} enhanced CWE details, {basic_cwe_count} basic CWE IDs")
         
         # Batch CVE lookup
         print("\n📋 Batch CVE Lookup (High-profile vulnerabilities):")
@@ -124,33 +169,84 @@ def main():
         
         print(f"   Processing Time: {batch_result['processing_time']:.3f}s")
         print(f"   Success Rate: {batch_result['summary']['success_rate']}")
+        print(f"   Performance: ~{len(batch_cves) / batch_result['processing_time']:.0f} CVEs/second")
         
+        print("\n   Detailed Results with CWE Information:")
         for result in batch_result['results']:
-            if result['found']:
-                data = result['data']
-                cvss_score = data.get('cvss_v3_score') or data.get('cvss_v2_score', 'N/A')
-                print(f"   {result['cve_id']}: {cvss_score}")
+            display_cve_with_cwe_details(result, show_description=False)
         
-        # CWE lookup
-        print("\n🛡️ CWE Lookup:")
-        cwe_result = client.lookup_cwe("CWE-79")
-        if cwe_result['found']:
-            data = cwe_result['data']
-            print(f"   {data['cwe_id']}: {data['name']}")
-            if data.get('weakness_abstraction'):
-                print(f"   Abstraction: {data['weakness_abstraction']}")
+        # CWE-focused analysis
+        print("\n🔬 CWE Analysis Examples:")
         
-        # Batch CWE lookup
-        print("\n📚 Batch CWE Lookup:")
-        batch_cwes = ["CWE-79", "CWE-89", "CWE-502", "CWE-787"]
-        cwe_batch_result = client.batch_lookup_cwe(batch_cwes)
+        # Extract CWE IDs from our CVE results
+        all_cwe_ids = set()
+        for result in batch_result['results']:
+            if result['found'] and result['data'].get('cwe_details'):
+                for cwe_info in result['data']['cwe_details']:
+                    cwe_id = cwe_info.get('cwe_id')
+                    if cwe_id:
+                        all_cwe_ids.add(cwe_id)
         
-        for result in cwe_batch_result['results']:
-            if result['found']:
-                data = result['data']
-                print(f"   {data['cwe_id']}: {data['name'][:50]}...")
+        if all_cwe_ids:
+            print(f"   Found {len(all_cwe_ids)} unique CWE types across vulnerabilities")
+            
+            # Lookup detailed CWE information
+            cwe_batch_result = client.batch_lookup_cwe(list(all_cwe_ids)[:5])  # Limit to first 5
+            
+            print("   Detailed CWE Information:")
+            for cwe_result in cwe_batch_result['results']:
+                if cwe_result['found']:
+                    data = cwe_result['data']
+                    print(f"   {data['cwe_id']}: {data['name']}")
+                    if data.get('weakness_abstraction'):
+                        print(f"      Abstraction: {data['weakness_abstraction']}")
+                    if data.get('status'):
+                        print(f"      Status: {data['status']}")
+        
+        # Advanced analysis example
+        print("\n📈 Advanced CVE + CWE Analysis:")
+        analysis_cve = "CVE-2021-44228"  # Log4Shell
+        
+        # Get full details
+        full_result = client.lookup_cve(analysis_cve, 
+                                       include_cvss_details=True, 
+                                       include_risk_analysis=True)
+        
+        if full_result['found']:
+            data = full_result['data']
+            print(f"   Analyzing {analysis_cve} (Log4Shell):")
+            
+            # CVSS Analysis
+            if full_result.get('cvss_details', {}).get('v3'):
+                cvss_v3 = full_result['cvss_details']['v3']
+                print(f"   📊 CVSS v3 Analysis:")
+                print(f"      Base Score: {cvss_v3.get('baseScore')} ({cvss_v3.get('baseSeverity')})")
+                print(f"      Attack Vector: {cvss_v3.get('attackVector')}")
+                print(f"      Attack Complexity: {cvss_v3.get('attackComplexity')}")
+            
+            # CWE Analysis
+            if data.get('cwe_details'):
+                print(f"   🛡️  CWE Analysis:")
+                for cwe_info in data['cwe_details']:
+                    cwe_id = cwe_info.get('cwe_id', 'Unknown')
+                    cwe_name = cwe_info.get('name', 'Unknown')
+                    print(f"      {cwe_id}: {cwe_name}")
+                    if cwe_info.get('description'):
+                        print(f"        {cwe_info['description'][:100]}...")
+            
+            # Risk Factors
+            if full_result.get('risk_analysis', {}).get('v3', {}).get('risk_factors'):
+                risk_factors = full_result['risk_analysis']['v3']['risk_factors']
+                print(f"   ⚠️   Key Risk Factors ({len(risk_factors)}):")
+                for factor in risk_factors[:3]:
+                    print(f"      • {factor}")
         
         print(f"\n✅ All examples completed successfully!")
+        print(f"\n💡 Key Enhancements Demonstrated:")
+        print(f"   • CVE responses now include detailed CWE information")
+        print(f"   • Enhanced CWE details: name, abstraction, status, description")
+        print(f"   • Integrated CVE + CWE analysis for comprehensive security assessment")
+        print(f"   • High-performance batch processing with CWE enrichment")
         
     except requests.exceptions.ConnectionError:
         print("❌ Error: Cannot connect to SeeVee API. Make sure the service is running on http://localhost:8000")
