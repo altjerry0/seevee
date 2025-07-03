@@ -33,8 +33,8 @@ def generate_vulnerability_report(cve_list):
     for cve_id in cve_list:
         print(f"\nProcessing {cve_id}...")
         
-        # Get CVE information
-        cve_data = get_cve_info(cve_id)
+        # Get CVE information with CWE details
+        cve_data = get_cve_info(cve_id, include_cwe_details=True)
         
         if not cve_data:
             print(f"  ❌ Could not retrieve data for {cve_id}")
@@ -50,6 +50,7 @@ def generate_vulnerability_report(cve_list):
             'severity': severity,
             'description': cve_data.get('description', 'N/A')[:100] + '...',
             'cwe_ids': cve_data.get('cwe_ids', []),
+            'cwe_details': cve_data.get('cwe_details', {}),
             'published': cve_data.get('published', 'N/A'),
             'vendor': cve_data.get('vendor_name', 'N/A'),
             'product': cve_data.get('product_name', 'N/A')
@@ -87,14 +88,53 @@ def generate_vulnerability_report(cve_list):
         print(f"  Published: {vuln['published']}")
         print(f"  Vendor/Product: {vuln['vendor']} / {vuln['product']}")
         
-        if vuln['cwe_ids']:
-            print(f"  CWE Types:")
+        # Enhanced CWE details display
+        if vuln['cwe_details']:
+            print(f"  CWE Types (Enhanced):")
+            for cwe_data in vuln['cwe_details']:
+                cwe_id = cwe_data.get('cwe_id', 'Unknown')
+                cwe_name = cwe_data.get('name', 'Unknown')
+                print(f"    • {cwe_id}: {cwe_name}")
+                if cwe_data.get('weakness_abstraction'):
+                    print(f"      Abstraction: {cwe_data['weakness_abstraction']}")
+                if cwe_data.get('status'):
+                    print(f"      Status: {cwe_data['status']}")
+        elif vuln['cwe_ids']:
+            print(f"  CWE Types (Basic):")
             for cwe_id in vuln['cwe_ids'][:3]:  # Show first 3 CWEs
                 cwe_info = get_cwe_info(cwe_id)
                 if cwe_info:
-                    print(f"    - {cwe_id}: {cwe_info['name']}")
+                    print(f"    • {cwe_id}: {cwe_info['name']}")
         
         print(f"  Description: {vuln['description']}")
+    
+    # CWE Analysis Section
+    print("\n" + "=" * 80)
+    print("                        CWE WEAKNESS ANALYSIS")
+    print("=" * 80)
+    
+    all_cwe_details = {}
+    for vuln in vulnerabilities:
+        for cwe_data in vuln.get('cwe_details', []):
+            cwe_id = cwe_data.get('cwe_id', 'Unknown')
+            if cwe_id not in all_cwe_details:
+                all_cwe_details[cwe_id] = {
+                    'data': cwe_data,
+                    'affected_cves': []
+                }
+            all_cwe_details[cwe_id]['affected_cves'].append(vuln['cve_id'])
+    
+    if all_cwe_details:
+        print("Common Weakness Patterns Found:")
+        for cwe_id, info in sorted(all_cwe_details.items(), key=lambda x: len(x[1]['affected_cves']), reverse=True):
+            cwe_data = info['data']
+            affected_cves = info['affected_cves']
+            print(f"\n  {cwe_id}: {cwe_data.get('name', 'Unknown')}")
+            print(f"    Affected CVEs: {', '.join(affected_cves)}")
+            if cwe_data.get('weakness_abstraction'):
+                print(f"    Abstraction: {cwe_data['weakness_abstraction']}")
+            if cwe_data.get('description'):
+                print(f"    Description: {cwe_data['description'][:150]}...")
     
     # Recommendations
     print("\n" + "=" * 80)
@@ -111,6 +151,13 @@ def generate_vulnerability_report(cve_list):
     if medium_vuln:
         print("⚠️  SCHEDULED PATCHING:")
         print(f"  - Plan remediation for {len(medium_vuln)} MEDIUM severity vulnerabilities")
+    
+    if all_cwe_details:
+        print("\n🛡️  SECURITY CONTROLS:")
+        common_patterns = sorted(all_cwe_details.items(), key=lambda x: len(x[1]['affected_cves']), reverse=True)[:3]
+        for cwe_id, info in common_patterns:
+            cwe_name = info['data'].get('name', 'Unknown')
+            print(f"  - Address {cwe_id} ({cwe_name}) - affects {len(info['affected_cves'])} CVEs")
     
     print("\n  - Monitor vendor security advisories for patches")
     print("  - Consider implementing additional security controls")
@@ -158,6 +205,61 @@ def demonstrate_cwe_analysis():
     print(f"\nNote: To access the complete MITRE CWE database with 399+ entries,")
     print("run: python seevee.py --update-cwe")
 
+
+def demonstrate_cwe_integration():
+    """Demonstrate enhanced CWE integration in CVE responses"""
+    print("\n" + "=" * 80)
+    print("                    CWE INTEGRATION DEMONSTRATION")
+    print("=" * 80)
+    
+    # Example CVEs that have CWE mappings
+    example_cves = [
+        "CVE-2021-44228",  # Log4Shell - has CWE mappings
+        "CVE-2022-22965",  # Spring4Shell - has CWE mappings  
+        "CVE-2014-0160",   # Heartbleed - has CWE mappings
+    ]
+    
+    print("Demonstrating CVE lookups with enhanced CWE details:")
+    
+    for cve_id in example_cves:
+        print(f"\n📋 {cve_id}:")
+        
+        # Get CVE with CWE details
+        cve_data = get_cve_info(cve_id, include_cwe_details=True)
+        
+        if not cve_data:
+            print(f"  ❌ Could not retrieve data for {cve_id}")
+            continue
+        
+        # Show basic info
+        cvss_score = cve_data.get('cvss_v3_score') or cve_data.get('cvss_v2_score')
+        print(f"  CVSS Score: {cvss_score}")
+        print(f"  Description: {cve_data.get('description', 'N/A')[:100]}...")
+        
+        # Show CWE details
+        if cve_data.get('cwe_details'):
+            print(f"  🛡️  CWE Details (Enhanced):")
+            for cwe_info in cve_data['cwe_details']:
+                cwe_id = cwe_info.get('cwe_id', 'Unknown')
+                cwe_name = cwe_info.get('name', 'Unknown')
+                print(f"    • {cwe_id}: {cwe_name}")
+                if cwe_info.get('weakness_abstraction'):
+                    print(f"      Abstraction: {cwe_info['weakness_abstraction']}")
+                if cwe_info.get('status'):
+                    print(f"      Status: {cwe_info['status']}")
+                if cwe_info.get('description'):
+                    print(f"      Description: {cwe_info['description'][:100]}...")
+        elif cve_data.get('cwe_ids'):
+            print(f"  🛡️  CWE IDs (Basic): {', '.join(cve_data['cwe_ids'])}")
+        else:
+            print(f"  🛡️  No CWE mappings found")
+    
+    # Show comparison
+    print(f"\n" + "-" * 60)
+    print("CWE Integration Comparison:")
+    print("• include_cwe_details=True: Full CWE database information")
+    print("• include_cwe_details=False: Just CWE IDs (if available)")
+    print("• Enhanced details include: name, abstraction, status, description")
 
 def demonstrate_cvss_analysis():
     """Demonstrate detailed CVSS analysis capabilities"""
@@ -245,6 +347,9 @@ def main():
     
     # Demonstrate CWE analysis
     demonstrate_cwe_analysis()
+    
+    # Demonstrate CWE integration
+    demonstrate_cwe_integration()
     
     # Demonstrate CVSS analysis
     demonstrate_cvss_analysis()
