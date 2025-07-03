@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SeeVee - CVE & CWE Vulnerability Lookup</title>
+    <meta name="description" content="Professional CVE and CWE vulnerability information lookup tool">
+    <link rel="stylesheet" href="css/styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <header class="header">
+        <nav class="nav">
+            <div class="nav-brand">
+                <i class="fas fa-shield-alt"></i>
+                <span>SeeVee</span>
+            </div>
+            <div class="nav-links">
+                <a href="#home" class="nav-link active">Home</a>
+                <a href="#cve-lookup" class="nav-link">CVE Lookup</a>
+                <a href="#cwe-lookup" class="nav-link">CWE Lookup</a>
+                <a href="#batch" class="nav-link">Batch Lookup</a>
+                <a href="#stats" class="nav-link">Statistics</a>
+            </div>
+            <div class="nav-toggle">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </nav>
+    </header>
+
+    <main class="main">
+        <!-- Home Section -->
+        <section id="home" class="section hero">
+            <div class="container">
+                <div class="hero-content">
+                    <h1>CVE & CWE Vulnerability Lookup</h1>
+                    <p class="hero-subtitle">Professional vulnerability intelligence and security research tool</p>
+                    <div class="hero-stats" id="hero-stats">
+                        <div class="stat-item">
+                            <span class="stat-number" id="cve-count">-</span>
+                            <span class="stat-label">CVE Records</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-number" id="cwe-count">-</span>
+                            <span class="stat-label">CWE Records</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-number" id="last-updated">-</span>
+                            <span class="stat-label">Last Updated</span>
+                        </div>
+                    </div>
+                    <div class="hero-actions">
+                        <button class="btn btn-primary" onclick="showSection('cve-lookup')">
+                            <i class="fas fa-search"></i> Start CVE Lookup
+                        </button>
+                        <button class="btn btn-secondary" onclick="showSection('cwe-lookup')">
+                            <i class="fas fa-bug"></i> CWE Lookup
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- CVE Lookup Section -->
+        <section id="cve-lookup" class="section">
+            <div class="container">
+                <h2>CVE Vulnerability Lookup</h2>
+                <div class="lookup-form">
+                    <div class="form-group">
+                        <label for="cve-input">CVE Identifier</label>
+                        <input type="text" id="cve-input" placeholder="e.g., CVE-2021-44228" class="form-input">
+                        <small class="form-help">Enter a CVE identifier (e.g., CVE-2021-44228)</small>
+                    </div>
+                    <div class="form-options">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="include-cvss-details" checked>
+                            <span class="checkmark"></span>
+                            Include CVSS Details
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="include-risk-analysis" checked>
+                            <span class="checkmark"></span>
+                            Include Risk Analysis
+                        </label>
+                    </div>
+                    <button class="btn btn-primary" onclick="lookupCVE()">
+                        <i class="fas fa-search"></i> Lookup CVE
+                    </button>
+                </div>
+                <div id="cve-results" class="results-container"></div>
+            </div>
+        </section>
+
+        <!-- CWE Lookup Section -->
+        <section id="cwe-lookup" class="section">
+            <div class="container">
+                <h2>CWE Weakness Lookup</h2>
+                <div class="lookup-form">
+                    <div class="form-group">
+                        <label for="cwe-input">CWE Identifier</label>
+                        <input type="text" id="cwe-input" placeholder="e.g., CWE-79 or 79" class="form-input">
+                        <small class="form-help">Enter a CWE identifier (e.g., CWE-79 or just 79)</small>
+                    </div>
+                    <button class="btn btn-primary" onclick="lookupCWE()">
+                        <i class="fas fa-bug"></i> Lookup CWE
+                    </button>
+                </div>
+                <div id="cwe-results" class="results-container"></div>
+            </div>
+        </section>
+
+        <!-- Batch Lookup Section -->
+        <section id="batch" class="section">
+            <div class="container">
+                <h2>Batch Lookup</h2>
+                <div class="batch-tabs">
+                    <button class="tab-btn active" onclick="showBatchTab('cve')">CVE Batch</button>
+                    <button class="tab-btn" onclick="showBatchTab('cwe')">CWE Batch</button>
+                </div>
+                
+                <div id="batch-cve" class="batch-content active">
+                    <div class="form-group">
+                        <label for="batch-cve-input">CVE Identifiers</label>
+                        <textarea id="batch-cve-input" placeholder="Enter CVE IDs separated by commas or new lines&#10;e.g., CVE-2021-44228, CVE-2022-22965" class="form-textarea"></textarea>
+                    </div>
+                    <div class="form-options">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="batch-include-cvss" checked>
+                            <span class="checkmark"></span>
+                            Include CVSS Details
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="batch-include-risk" checked>
+                            <span class="checkmark"></span>
+                            Include Risk Analysis
+                        </label>
+                    </div>
+                    <button class="btn btn-primary" onclick="batchLookupCVE()">
+                        <i class="fas fa-list"></i> Batch Lookup CVEs
+                    </button>
+                </div>
+
+                <div id="batch-cwe" class="batch-content">
+                    <div class="form-group">
+                        <label for="batch-cwe-input">CWE Identifiers</label>
+                        <textarea id="batch-cwe-input" placeholder="Enter CWE IDs separated by commas or new lines&#10;e.g., CWE-79, 89, CWE-502" class="form-textarea"></textarea>
+                    </div>
+                    <button class="btn btn-primary" onclick="batchLookupCWE()">
+                        <i class="fas fa-list"></i> Batch Lookup CWEs
+                    </button>
+                </div>
+                
+                <div id="batch-results" class="results-container"></div>
+            </div>
+        </section>
+
+        <!-- Statistics Section -->
+        <section id="stats" class="section">
+            <div class="container">
+                <h2>Database Statistics</h2>
+                <div id="stats-content" class="stats-grid">
+                    <div class="stat-card">
+                        <i class="fas fa-database"></i>
+                        <h3>Database Status</h3>
+                        <div id="db-status">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Loading...</p>
+        </div>
+    </div>
+
+    <!-- Error Toast -->
+    <div id="error-toast" class="toast toast-error">
+        <div class="toast-content">
+            <i class="fas fa-exclamation-circle"></i>
+            <span class="toast-message"></span>
+        </div>
+        <button class="toast-close" onclick="hideToast()">
+            <i class="fas fa-times"></i>
+        </button>
+    </div>
+
+    <!-- Success Toast -->
+    <div id="success-toast" class="toast toast-success">
+        <div class="toast-content">
+            <i class="fas fa-check-circle"></i>
+            <span class="toast-message"></span>
+        </div>
+        <button class="toast-close" onclick="hideToast()">
+            <i class="fas fa-times"></i>
+        </button>
+    </div>
+
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2024 SeeVee - Vulnerability Intelligence Platform</p>
+            <p>Powered by <a href="https://nvd.nist.gov/" target="_blank">NVD</a> and <a href="https://cwe.mitre.org/" target="_blank">MITRE CWE</a></p>
+        </div>
+    </footer>
+
+    <script src="js/config.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html> 

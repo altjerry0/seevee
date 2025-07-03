@@ -1,0 +1,21 @@
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+[environments.production]
+SEEVEE_API_KEY = "${{SEEVEE_API_KEY}}"
+ENVIRONMENT = "production"
+UPDATE_DB_ON_STARTUP = "true"
+SKIP_YEARS = "2020,2019,2018,2017,2016,2015,2014,2013,2012,2011,2010,2009,2008,2007,2006,2005,2004,2003,2002"
+CORS_ORIGINS = "*"
+
+[environments.staging]
+SEEVEE_API_KEY = "${{SEEVEE_API_KEY}}"
+ENVIRONMENT = "staging"
+UPDATE_DB_ON_STARTUP = "false"
+CORS_ORIGINS = "*" 
