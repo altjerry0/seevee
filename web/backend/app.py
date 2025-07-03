@@ -78,21 +78,32 @@ async def lifespan(app: FastAPI):
     app_state["startup_time"] = datetime.now()
     print("🚀 Starting SeeVee Web API Server...")
     
+    # Start database update in background to not block startup
     if Config.UPDATE_DB_ON_STARTUP and not app_state["update_in_progress"]:
-        print("📊 Updating database on startup...")
-        try:
-            app_state["update_in_progress"] = True
-            update_cwe_database()
-            # Quick update for cloud deployment
-            current_year = datetime.now().year
-            update_database(years=[current_year, current_year - 1], include_modified=True)
-            app_state["last_db_update"] = datetime.now()
-            print("✅ Database update completed")
-        except Exception as e:
-            print(f"❌ Database update failed: {e}")
-        finally:
-            app_state["update_in_progress"] = False
+        print("📊 Scheduling database update...")
+        import threading
+        
+        def update_db_background():
+            try:
+                app_state["update_in_progress"] = True
+                print("📊 Starting background database update...")
+                update_cwe_database()
+                # Quick update for cloud deployment
+                current_year = datetime.now().year
+                update_database(years=[current_year, current_year - 1], include_modified=True)
+                app_state["last_db_update"] = datetime.now()
+                print("✅ Background database update completed")
+            except Exception as e:
+                print(f"❌ Background database update failed: {e}")
+            finally:
+                app_state["update_in_progress"] = False
+        
+        # Start update in background thread
+        db_thread = threading.Thread(target=update_db_background, daemon=True)
+        db_thread.start()
+        print("📊 Database update started in background")
     
+    print("🟢 SeeVee API Server is ready!")
     yield
     print("👋 Shutting down SeeVee Web API Server...")
 
@@ -170,7 +181,10 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "uptime_seconds": uptime
+        "uptime_seconds": uptime,
+        "database_update_in_progress": app_state["update_in_progress"],
+        "last_database_update": app_state["last_db_update"].isoformat() if app_state["last_db_update"] else None,
+        "environment": Config.ENVIRONMENT
     }
 
 
@@ -353,6 +367,39 @@ async def batch_lookup_cwe(request: CWERequest):
             "not_found": len(results) - found_count
         },
         "processing_time": processing_time
+    }
+
+
+@app.post("/update", dependencies=[Depends(verify_api_key)])
+async def trigger_database_update(background_tasks: BackgroundTasks):
+    """Manually trigger database update"""
+    if app_state["update_in_progress"]:
+        return {
+            "status": "already_in_progress",
+            "message": "Database update is already in progress"
+        }
+    
+    def update_db_background():
+        try:
+            app_state["update_in_progress"] = True
+            print("📊 Starting manual database update...")
+            update_cwe_database()
+            # Quick update for cloud deployment
+            current_year = datetime.now().year
+            update_database(years=[current_year, current_year - 1], include_modified=True)
+            app_state["last_db_update"] = datetime.now()
+            print("✅ Manual database update completed")
+        except Exception as e:
+            print(f"❌ Manual database update failed: {e}")
+        finally:
+            app_state["update_in_progress"] = False
+    
+    background_tasks.add_task(update_db_background)
+    
+    return {
+        "status": "started",
+        "message": "Database update has been started in the background",
+        "timestamp": datetime.now().isoformat()
     }
 
 

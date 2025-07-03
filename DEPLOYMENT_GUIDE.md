@@ -86,10 +86,16 @@ API_KEY="svu-$(openssl rand -hex 16)-prod"
    ```
    SEEVEE_API_KEY=your-secure-api-key-here
    ENVIRONMENT=production
-   UPDATE_DB_ON_STARTUP=true
+   UPDATE_DB_ON_STARTUP=false
    CORS_ORIGINS=*
    ```
+   ⚠️ **Note**: Set `UPDATE_DB_ON_STARTUP=false` for faster deployment. Update database manually after deployment.
 5. Note your Railway URL (e.g., `https://seevee-api.railway.app`)
+6. **After deployment**, manually update database:
+   ```bash
+   curl -X POST "https://your-url.railway.app/update" \
+     -H "X-API-Key: your-secure-api-key-here"
+   ```
 
 #### Option B: Render
 1. Create [Render](https://render.com) account
@@ -165,6 +171,11 @@ curl -X POST "https://your-backend-url.com/update" \
   -H "X-API-Key: your-api-key"
 ```
 
+Check update status:
+```bash
+curl "https://your-backend-url.com/health"
+```
+
 Or via GitHub Actions (manual workflow dispatch)
 
 ### Database Size Optimization
@@ -210,20 +221,26 @@ curl -H "X-API-Key: your-key" https://your-backend-url.com/stats
 
 ### Common Issues
 
-1. **API Key Mismatch**
+1. **Railway Healthcheck Failures**
+   - Check Railway logs for startup errors
+   - Verify start command: `cd web/backend && python -m uvicorn app:app --host 0.0.0.0 --port $PORT`
+   - Set `UPDATE_DB_ON_STARTUP=false` for faster startup
+   - Manually trigger database update after deployment: `curl -X POST "https://your-url.railway.app/update" -H "X-API-Key: your-key"`
+
+2. **API Key Mismatch**
    - Verify frontend config matches backend env var
    - Check browser console for 401 errors
 
-2. **CORS Errors**
+3. **CORS Errors**
    - Add frontend domain to `CORS_ORIGINS`
    - Use `*` for development, specific domains for production
 
-3. **Database Update Failures**
+4. **Database Update Failures**
    - Check GitHub Actions logs
    - Verify disk space on deployment platform
-   - Try manual trigger
+   - Try manual trigger via `/update` endpoint
 
-4. **Performance Issues**
+5. **Performance Issues**
    - Enable caching in frontend config
    - Monitor backend response times
    - Consider upgrading hosting plans
