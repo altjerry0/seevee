@@ -1,0 +1,106 @@
+name: Update Vulnerability Database
+
+on:
+  schedule:
+    # Run every 6 hours (at 00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_full_update:
+        description: 'Force full database update (all years)'
+        required: false
+        default: 'false'
+        type: boolean
+      update_cwe:
+        description: 'Update CWE database'
+        required: false
+        default: 'true'
+        type: boolean
+
+jobs:
+  update-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hours timeout
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Create data directory
+      run: |
+        mkdir -p data
+        
+    - name: Update CWE database
+      if: ${{ github.event.inputs.update_cwe != 'false' }}
+      run: |
+        echo "🔄 Updating CWE database..."
+        python seevee.py --update-cwe
+        echo "✅ CWE database updated"
+
+    - name: Update CVE database (incremental)
+      if: ${{ github.event.inputs.force_full_update != 'true' }}
+      run: |
+        echo "🔄 Performing incremental CVE database update..."
+        current_year=$(date +%Y)
+        previous_year=$((current_year - 1))
+        python seevee.py --update-db --years $current_year $previous_year
+        echo "✅ Incremental CVE database update completed"
+
+    - name: Update CVE database (full)
+      if: ${{ github.event.inputs.force_full_update == 'true' }}
+      run: |
+        echo "🔄 Performing full CVE database update..."
+        python seevee.py --update-db
+        echo "✅ Full CVE database update completed"
+
+    - name: Check database size
+      run: |
+        if [ -f "cve_database.db" ]; then
+          db_size=$(du -h cve_database.db | cut -f1)
+          echo "📊 Database size: $db_size"
+        else
+          echo "⚠️ Database file not found"
+        fi
+
+    - name: Upload database artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: vulnerability-database-${{ github.run_number }}
+        path: |
+          cve_database.db
+          *.db
+        retention-days: 7
+        compression-level: 9
+
+    - name: Notify on failure
+      if: failure()
+      run: |
+        echo "❌ Database update failed!"
+        echo "Check the logs for more details."
+        # You can add notification logic here (e.g., send to Discord, Slack, etc.)
+
+    - name: Database update summary
+      if: always()
+      run: |
+        echo "=== Database Update Summary ==="
+        echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "Workflow: ${{ github.workflow }}"
+        echo "Run ID: ${{ github.run_id }}"
+        echo "Status: ${{ job.status }}"
+        
+        if [ -f "cve_database.db" ]; then
+          echo "Database file exists: Yes"
+          echo "Database size: $(du -h cve_database.db | cut -f1)"
+        else
+          echo "Database file exists: No"
+        fi 

@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: seevee-api
+    env: python
+    buildCommand: "cd web/backend && pip install -r requirements.txt"
+    startCommand: "cd web/backend && python app.py"
+    healthCheckPath: /health
+    
+    envVars:
+      - key: SEEVEE_API_KEY
+        sync: false  # Set this manually in Render dashboard
+      - key: ENVIRONMENT
+        value: production
+      - key: UPDATE_DB_ON_STARTUP
+        value: "true"
+      - key: SKIP_YEARS
+        value: "2020,2019,2018,2017,2016,2015,2014,2013,2012,2011,2010,2009,2008,2007,2006,2005,2004,2003,2002"
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: PORT
+        value: "10000"
+      - key: HOST
+        value: "0.0.0.0"
+    
+    # Disk storage for database
+    disk:
+      name: seevee-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 5
+
+databases:
+  # Optional: PostgreSQL database for future use
+  # - name: seevee-postgres
+  #   databaseName: seevee
+  #   user: seevee_user 
