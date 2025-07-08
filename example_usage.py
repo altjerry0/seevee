@@ -50,7 +50,7 @@ def generate_vulnerability_report(cve_list):
             'severity': severity,
             'description': cve_data.get('description', 'N/A')[:100] + '...',
             'cwe_ids': cve_data.get('cwe_ids', []),
-            'cwe_details': cve_data.get('cwe_details', {}),
+            'cwe_details': cve_data.get('cwe_details', []),
             'published': cve_data.get('published', 'N/A'),
             'vendor': cve_data.get('vendor_name', 'N/A'),
             'product': cve_data.get('product_name', 'N/A')

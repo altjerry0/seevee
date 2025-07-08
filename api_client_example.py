@@ -7,6 +7,7 @@ Demonstrates how to use the SeeVee API service for CVE and CWE lookups
 import requests
 import json
 from typing import List, Dict, Any
+import traceback
 
 
 class SeeVeeAPIClient:
@@ -82,41 +83,43 @@ class SeeVeeAPIClient:
 
 def display_cve_with_cwe_details(cve_result: Dict[str, Any], show_description: bool = True):
     """Helper function to display CVE results with enhanced CWE details"""
-    if not cve_result['found']:
-        print(f"   ❌ {cve_result['cve_id']}: {cve_result.get('error', 'Not found')}")
+    if not isinstance(cve_result, dict):
+        print(f"   ❌ Invalid CVE result: {cve_result}")
         return
-    
+    if not cve_result.get('found'):
+        print(f"   ❌ {cve_result.get('cve_id', 'Unknown')}: {cve_result.get('error', 'Not found')}")
+        return
     data = cve_result['data']
     print(f"   ✅ {data['id']}")
-    
     # Basic CVE info
     cvss_score = data.get('cvss_v3_score') or data.get('cvss_v2_score', 'N/A')
     cvss_severity = data.get('cvss_v3_severity') or data.get('cvss_v2_severity', 'N/A')
     print(f"      CVSS: {cvss_score} ({cvss_severity})")
-    
     if show_description:
         description = data.get('description', 'N/A')
         print(f"      Description: {description[:100]}...")
-    
     # Enhanced CWE details
     if data.get('cwe_details'):
         print(f"      🛡️  CWE Details (Enhanced):")
         for cwe_info in data['cwe_details']:
-            cwe_id = cwe_info.get('cwe_id', 'Unknown')
-            cwe_name = cwe_info.get('name', 'Unknown')
-            print(f"        • {cwe_id}: {cwe_name}")
-            if cwe_info.get('weakness_abstraction'):
-                print(f"          Abstraction: {cwe_info['weakness_abstraction']}")
-            if cwe_info.get('status'):
-                print(f"          Status: {cwe_info['status']}")
+            if cwe_info and isinstance(cwe_info, dict):  # Ensure cwe_info is valid
+                cwe_id = cwe_info.get('cwe_id', 'Unknown')
+                cwe_name = cwe_info.get('name', 'Unknown')
+                print(f"        • {cwe_id}: {cwe_name}")
+                if cwe_info.get('weakness_abstraction'):
+                    print(f"          Abstraction: {cwe_info['weakness_abstraction']}")
+                if cwe_info.get('status'):
+                    print(f"          Status: {cwe_info['status']}")
+            else:
+                print(f"        ❌ Invalid CWE info: {cwe_info}")
     elif data.get('cwe_ids'):
         print(f"      🛡️  CWE IDs: {', '.join(data['cwe_ids'])}")
     else:
         print(f"      🛡️  No CWE mappings available")
-    
     # Risk analysis if available
-    if cve_result.get('risk_analysis', {}).get('v3'):
-        risk_factors = cve_result['risk_analysis']['v3'].get('risk_factors', [])
+    risk_analysis = cve_result.get('risk_analysis')
+    if isinstance(risk_analysis, dict) and risk_analysis.get('v3'):
+        risk_factors = risk_analysis['v3'].get('risk_factors', [])
         if risk_factors:
             print(f"      ⚠️   Risk Factors: {len(risk_factors)} identified")
             for factor in risk_factors[:2]:  # Show first 2
@@ -158,7 +161,7 @@ def main():
             cve_result = client.lookup_cve(cve_id)
             if cve_result['found']:
                 data = cve_result['data']
-                cwe_count = len(data.get('cwe_details', {}))
+                cwe_count = len(data.get('cwe_details', []))
                 basic_cwe_count = len(data.get('cwe_ids', []))
                 print(f"   {cve_id}: {cwe_count} enhanced CWE details, {basic_cwe_count} basic CWE IDs")
         
@@ -183,9 +186,10 @@ def main():
         for result in batch_result['results']:
             if result['found'] and result['data'].get('cwe_details'):
                 for cwe_info in result['data']['cwe_details']:
-                    cwe_id = cwe_info.get('cwe_id')
-                    if cwe_id:
-                        all_cwe_ids.add(cwe_id)
+                    if cwe_info and isinstance(cwe_info, dict):  # Ensure cwe_info is valid
+                        cwe_id = cwe_info.get('cwe_id')
+                        if cwe_id:
+                            all_cwe_ids.add(cwe_id)
         
         if all_cwe_ids:
             print(f"   Found {len(all_cwe_ids)} unique CWE types across vulnerabilities")
@@ -195,13 +199,15 @@ def main():
             
             print("   Detailed CWE Information:")
             for cwe_result in cwe_batch_result['results']:
-                if cwe_result['found']:
+                if cwe_result.get('found') and cwe_result.get('data'):
                     data = cwe_result['data']
-                    print(f"   {data['cwe_id']}: {data['name']}")
+                    print(f"   {data.get('cwe_id', 'Unknown')}: {data.get('name', 'Unknown')}")
                     if data.get('weakness_abstraction'):
                         print(f"      Abstraction: {data['weakness_abstraction']}")
                     if data.get('status'):
                         print(f"      Status: {data['status']}")
+                else:
+                    print(f"   ❌ {cwe_result.get('cwe_id', 'Unknown')}: {cwe_result.get('error', 'Not found')}")
         
         # Advanced analysis example
         print("\n📈 Advanced CVE + CWE Analysis:")
@@ -217,29 +223,45 @@ def main():
             print(f"   Analyzing {analysis_cve} (Log4Shell):")
             
             # CVSS Analysis
-            if full_result.get('cvss_details', {}).get('v3'):
-                cvss_v3 = full_result['cvss_details']['v3']
+            cvss_details = full_result.get('cvss_details', {})
+            if cvss_details and isinstance(cvss_details, dict) and cvss_details.get('v3'):
+                cvss_v3 = cvss_details['v3']
                 print(f"   📊 CVSS v3 Analysis:")
-                print(f"      Base Score: {cvss_v3.get('baseScore')} ({cvss_v3.get('baseSeverity')})")
-                print(f"      Attack Vector: {cvss_v3.get('attackVector')}")
-                print(f"      Attack Complexity: {cvss_v3.get('attackComplexity')}")
-            
+                if cvss_v3:
+                    print(f"      Base Score: {cvss_v3.get('baseScore', 'N/A')} ({cvss_v3.get('baseSeverity', 'N/A')})")
+                    print(f"      Attack Vector: {cvss_v3.get('attackVector', 'N/A')}")
+                    print(f"      Attack Complexity: {cvss_v3.get('attackComplexity', 'N/A')}")
+            else:
+                pass
+
             # CWE Analysis
             if data.get('cwe_details'):
                 print(f"   🛡️  CWE Analysis:")
                 for cwe_info in data['cwe_details']:
-                    cwe_id = cwe_info.get('cwe_id', 'Unknown')
-                    cwe_name = cwe_info.get('name', 'Unknown')
-                    print(f"      {cwe_id}: {cwe_name}")
-                    if cwe_info.get('description'):
-                        print(f"        {cwe_info['description'][:100]}...")
-            
+                    if cwe_info and isinstance(cwe_info, dict):
+                        cwe_id = cwe_info.get('cwe_id', 'Unknown')
+                        cwe_name = cwe_info.get('name', 'Unknown')
+                        print(f"      {cwe_id}: {cwe_name}")
+                        if cwe_info.get('description'):
+                            print(f"        {cwe_info['description'][:100]}...")
+                    else:
+                        print(f"      ❌ Invalid CWE info: {cwe_info}")
+            else:
+                pass
+
             # Risk Factors
-            if full_result.get('risk_analysis', {}).get('v3', {}).get('risk_factors'):
-                risk_factors = full_result['risk_analysis']['v3']['risk_factors']
-                print(f"   ⚠️   Key Risk Factors ({len(risk_factors)}):")
-                for factor in risk_factors[:3]:
-                    print(f"      • {factor}")
+            risk_analysis = full_result.get('risk_analysis')
+            if isinstance(risk_analysis, dict) and risk_analysis.get('v3'):
+                v3_risk = risk_analysis['v3']
+                if v3_risk and isinstance(v3_risk, dict) and v3_risk.get('risk_factors'):
+                    risk_factors = v3_risk['risk_factors']
+                    print(f"   ⚠️   Key Risk Factors ({len(risk_factors)}):")
+                    for factor in risk_factors[:3]:
+                        print(f"      • {factor}")
+                else:
+                    pass
+            else:
+                pass
         
         print(f"\n✅ All examples completed successfully!")
         print(f"\n💡 Key Enhancements Demonstrated:")
@@ -255,6 +277,7 @@ def main():
         print(f"❌ HTTP Error: {e}")
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

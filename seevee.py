@@ -765,7 +765,7 @@ class CWEClient:
         try:
             print("Downloading CWE data from MITRE...")
             download_start = time.time()
-            url = "https://cwe.mitre.org/data/csv/699.csv.zip"
+            url = "https://cwe.mitre.org/data/csv/1000.csv.zip"
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                 'Accept': 'application/zip, */*',
@@ -780,8 +780,11 @@ class CWEClient:
             print(f"Extracting and parsing CWE data... (download took {format_duration(download_duration)})")
             parsing_start = time.time()
             with zipfile.ZipFile(io.BytesIO(response.content)) as zip_file:
-                csv_filename = "699.csv"
-                if csv_filename in zip_file.namelist():
+                # Look for CSV files in the ZIP (should be 1000.csv for the full dataset)
+                csv_files = [f for f in zip_file.namelist() if f.endswith('.csv')]
+                if csv_files:
+                    csv_filename = csv_files[0]  # Use the first CSV file found
+                    print(f"Found CSV file: {csv_filename}")
                     csv_content = zip_file.read(csv_filename).decode('utf-8')
                     csv_reader = csv.DictReader(io.StringIO(csv_content))
                     
@@ -807,7 +810,8 @@ class CWEClient:
                     print(f"Total time: {format_duration(total_duration)}")
                     return True
                 else:
-                    print(f"CSV file {csv_filename} not found in ZIP")
+                    print(f"No CSV files found in ZIP archive")
+                    print(f"Available files: {zip_file.namelist()}")
                     return False
                     
         except Exception as e:
@@ -916,6 +920,9 @@ def enrich_cve_with_cwe_details(cve_data: Dict, include_cwe_details: bool = True
             })
     
     # Add enriched CWE details while preserving original cwe_ids
+    # Filter out any None values to prevent errors
+    cwe_details = [cwe for cwe in cwe_details if cwe is not None]
+    
     enhanced_cve_data = cve_data.copy()
     enhanced_cve_data['cwe_details'] = cwe_details
     return enhanced_cve_data
